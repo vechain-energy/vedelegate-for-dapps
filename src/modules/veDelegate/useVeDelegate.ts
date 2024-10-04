@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useConnex, useWallet } from "@vechain/dapp-kit-react";
 import { Addresses } from "./config";
+import type { SigningCallbackFunc, Domain, ExecuteWithAuthorizationTypes, ExecuteWithAuthorizationMessage } from "./types";
 
 const getEmptyBalance = () => ({
     b3tr: 0n,
@@ -29,32 +30,129 @@ export function useVeDelegate() {
     const [address, setAddress] = useState("")
     const [accountBalance, setAccountBalance] = useState(getEmptyBalance())
     const [balance, setBalance] = useState(getEmptyBalance())
+    const [chainId, setChainId] = useState('')
 
     const refetch = useCallback(() => setUpdateTrigger(Date.now()), [])
 
+
     /**
-     * helper function to wrap smart account instructions
+     * Helper function to build signed data for smart account instructions
      */
-    const executeOnSmartAccount = useCallback((
+    const buildSmartAccountSignature = useCallback(async (
         to: string,
         value: string,
         data: string,
-        operation: number = 0
+        validAfter: number,
+        validBefore: number,
+        nonce: string,
+        signCallback: SigningCallbackFunc
     ) => {
-        return connex.thor
-            .account(address)
-            .method({
-                inputs: [
-                    { name: "to", type: "address" },
-                    { name: "value", type: "uint256" },
-                    { name: "data", type: "bytes" },
-                    { name: "operation", type: "uint256" }
-                ],
-                name: "execute",
-                outputs: []
-            })
-            .asClause(to, value, data, operation);
-    }, [connex, address]);
+        const domain: Domain = {
+            name: 'vedelegate.vet',
+            version: '1',
+            chainId,
+            verifyingContract: address
+        }
+
+        const types: ExecuteWithAuthorizationTypes = {
+            ExecuteWithAuthorization: [
+                { name: "to", type: "address" },
+                { name: "value", type: "uint256" },
+                { name: "data", type: "bytes" },
+                { name: "validAfter", type: "uint256" },
+                { name: "validBefore", type: "uint256" },
+                { name: "nonce", type: "bytes32" },
+            ],
+        }
+
+        const message: ExecuteWithAuthorizationMessage = {
+            to: to,
+            value: value,
+            data: data,
+            validAfter: validAfter,
+            validBefore: validBefore,
+            nonce: nonce
+        }
+
+        const signature = await signCallback(domain, types, message);
+
+        return {
+            to: message.to,
+            value: message.value,
+            data: message.data,
+            validAfter: message.validAfter,
+            validBefore: message.validBefore,
+            nonce: message.nonce,
+            signature: signature
+        };
+    }, [chainId, address]);
+
+
+    /**
+     * Helper function to wrap smart account instructions
+     */
+    const executeOnSmartAccount = useCallback(async (
+        to: string,
+        value: string,
+        data: string,
+        operation: number = 0,
+        signingCallback?: SigningCallbackFunc
+    ) => {
+        if (signingCallback) {
+            const validAfter = Math.floor(Date.now() / 1000) - 10; // valid after previous block
+            const validBefore = Math.floor(Date.now() / 1000) + 3600; // validBefore: 1 hour from now
+            const nonce = String(Date.now());
+
+            const signedData = await buildSmartAccountSignature(
+                to,
+                value,
+                data,
+                validAfter,
+                validBefore,
+                nonce,
+                signingCallback
+            );
+
+            return connex.thor
+                .account(address)
+                .method({
+                    inputs: [
+                        { name: "to", type: "address" },
+                        { name: "value", type: "uint256" },
+                        { name: "data", type: "bytes" },
+                        { name: "validAfter", type: "uint256" },
+                        { name: "validBefore", type: "uint256" },
+                        { name: "nonce", type: "bytes32" },
+                        { name: "signature", type: "bytes" }
+                    ],
+                    name: "executeWithAuthorization",
+                    outputs: [{ name: "result", type: "bytes" }]
+                })
+                .asClause(
+                    signedData.to,
+                    signedData.value,
+                    signedData.data,
+                    signedData.validAfter,
+                    signedData.validBefore,
+                    signedData.nonce,
+                    signedData.signature
+                );
+        } else {
+            return connex.thor
+                .account(address)
+                .method({
+                    inputs: [
+                        { name: "to", type: "address" },
+                        { name: "value", type: "uint256" },
+                        { name: "data", type: "bytes" },
+                        { name: "operation", type: "uint256" }
+                    ],
+                    name: "execute",
+                    outputs: []
+                })
+                .asClause(to, value, data, operation);
+        }
+    }, [connex, address, buildSmartAccountSignature]);
 
     /**
      * load the balance of an address and return some token insights
@@ -107,7 +205,7 @@ export function useVeDelegate() {
     /**
      *  build clauses for seperate transactions, for the given amount of B3TR and VOT3
      */
-    const buildDepositClauses = useCallback(async ({ b3tr, vot3 }: { b3tr: bigint, vot3: bigint }) => {
+    const buildDepositClauses = useCallback(async ({ b3tr, vot3, signingCallback }: { b3tr: bigint, vot3: bigint, signingCallback?: SigningCallbackFunc }) => {
         // collect clauses for transaction
         const clauses = []
 
@@ -163,7 +261,7 @@ export function useVeDelegate() {
                     .asClause(address, String(b3tr)),
 
                 // Approve B3TR for conversion to VOT3
-                executeOnSmartAccount(
+                await executeOnSmartAccount(
                     Addresses.B3TR,
                     "0",
                     connex.thor.account(Addresses.B3TR).method({
@@ -173,11 +271,13 @@ export function useVeDelegate() {
                         ],
                         name: "approve",
                         outputs: [{ type: "bool" }]
-                    }).asClause(Addresses.VOT3, String(b3tr)).data
+                    }).asClause(Addresses.VOT3, String(b3tr)).data,
+                    0,
+                    signingCallback
                 ),
 
                 // Convert B3TR to VOT3
-                executeOnSmartAccount(
+                await executeOnSmartAccount(
                     Addresses.VOT3,
                     "0",
                     connex.thor.account(Addresses.VOT3).method({
@@ -186,7 +286,9 @@ export function useVeDelegate() {
                         ],
                         name: "convertToVOT3",
                         outputs: []
-                    }).asClause(String(b3tr)).data
+                    }).asClause(String(b3tr)).data,
+                    0,
+                    signingCallback
                 )
             )
         }
@@ -197,14 +299,14 @@ export function useVeDelegate() {
     *  build clauses for seperate transactions, for the given amount of B3TR and VOT3
     *  the funds will be sent to the given recipient
     */
-    const buildWithdrawClauses = useCallback(async ({ b3tr, vot3, recipient }: { b3tr: bigint, vot3: bigint, recipient: string }) => {
+    const buildWithdrawClauses = useCallback(async ({ b3tr, vot3, recipient, signingCallback }: { b3tr: bigint, vot3: bigint, recipient: string, signingCallback?: SigningCallbackFunc }) => {
         // collect clauses for transaction
         const clauses = []
 
         // VOT3 is transferred directly
         if (vot3 > 0n) {
             clauses.push(
-                executeOnSmartAccount(
+                await executeOnSmartAccount(
                     Addresses.VOT3,
                     "0",
                     connex.thor.account(Addresses.VOT3).method({
@@ -214,7 +316,9 @@ export function useVeDelegate() {
                         ],
                         name: "transfer",
                         outputs: []
-                    }).asClause(recipient, String(vot3)).data
+                    }).asClause(recipient, String(vot3)).data,
+                    0,
+                    signingCallback
                 )
             )
         }
@@ -224,7 +328,7 @@ export function useVeDelegate() {
         if (b3tr > 0n) {
             clauses.push(
                 // Convert VOT3 to B3TR
-                executeOnSmartAccount(
+                await executeOnSmartAccount(
                     Addresses.VOT3,
                     "0",
                     connex.thor.account(Addresses.VOT3).method({
@@ -233,11 +337,13 @@ export function useVeDelegate() {
                         ],
                         name: "convertToB3TR",
                         outputs: []
-                    }).asClause(String(b3tr > balance.convertedB3tr ? balance.convertedB3tr : b3tr)).data
+                    }).asClause(String(b3tr > balance.convertedB3tr ? balance.convertedB3tr : b3tr)).data,
+                    0,
+                    signingCallback
                 ),
 
                 // Transfer the converted B3TR to the recipient
-                executeOnSmartAccount(
+                await executeOnSmartAccount(
                     Addresses.B3TR,
                     "0",
                     connex.thor.account(Addresses.B3TR).method({
@@ -247,19 +353,20 @@ export function useVeDelegate() {
                         ],
                         name: "transfer",
                         outputs: []
-                    }).asClause(recipient, String(b3tr)).data
+                    }).asClause(recipient, String(b3tr)).data,
+                    0,
+                    signingCallback
                 )
             )
         }
         return clauses
     }, [connex, address, balance, executeOnSmartAccount])
 
-
     /**
      * build voting support
      * if this is not used or an empty list, all votes will be equally split over all apps
      */
-    const buildSupportClauses = useCallback(async ({ appIds, percentages }: { appIds: string[], percentages: number[] }) => {
+    const buildSupportClauses = useCallback(async ({ appIds, percentages, signingCallback }: { appIds: string[], percentages: number[], signingCallback?: SigningCallbackFunc }) => {
         // Ensure appIds and percentages are valid
         if (appIds.length !== percentages.length || appIds.length === 0) {
             throw new Error('Invalid input: appIds and percentages must be non-empty arrays of the same length');
@@ -273,21 +380,28 @@ export function useVeDelegate() {
             return Math.floor(p);
         });
 
-        // Create the clause for casting votes
-        const clause = executeOnSmartAccount(
-            Addresses.VeDelegateVotes,
-            "0",
-            connex.thor.account(Addresses.VeDelegateVotes).method({
-                inputs: [
-                    { name: "appIds", type: "bytes32[]" },
-                    { name: "percentages", type: "uint8[]" }
-                ],
-                name: "castVotes",
-                outputs: []
-            }).asClause(appIds, uint8Percentages).data
-        );
+        const data = connex.thor.account(Addresses.VeDelegateVotes).method({
+            inputs: [
+                { name: "appIds", type: "bytes32[]" },
+                { name: "percentages", type: "uint8[]" }
+            ],
+            name: "castVotes",
+            outputs: []
+        }).asClause(appIds, uint8Percentages).data;
 
-        return [clause]
+        // Create the clause for casting votes
+        const clauses = []
+        clauses.push(
+            await executeOnSmartAccount(
+                Addresses.VeDelegateVotes,
+                "0",
+                data,
+                0,
+                signingCallback
+            )
+        )
+
+        return clauses
     }, [connex, address, executeOnSmartAccount])
 
     /**
@@ -358,6 +472,31 @@ export function useVeDelegate() {
                 console.error(error);
             });
     }, [tokenId, connex])
+
+    /**
+     * Get the chain ID for the smart account
+     */
+    useEffect(() => {
+        if (!address) {
+            setChainId('');
+            return;
+        }
+
+        connex.thor
+            .account(address)
+            .method({
+                inputs: [],
+                name: "getChainId",
+                outputs: [{ type: "uint256" }]
+            })
+            .call()
+            .then(({ decoded }: { decoded: [BigInt] }) => {
+                setChainId(decoded[0].toString());
+            })
+            .catch(() => {
+                setChainId('');
+            });
+    }, [address, connex]);
 
     /**
      * get balance of the staking wallet
