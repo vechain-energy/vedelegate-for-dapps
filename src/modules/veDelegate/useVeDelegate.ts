@@ -32,6 +32,9 @@ export function useVeDelegate() {
 
     const refetch = useCallback(() => setUpdateTrigger(Date.now()), [])
 
+    /**
+     * helper function to wrap smart account instructions
+     */
     const executeOnSmartAccount = useCallback((
         to: string,
         value: string,
