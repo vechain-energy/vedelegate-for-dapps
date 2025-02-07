@@ -77,7 +77,8 @@ export default function VeDelegate() {
 
                     <div className='font-mono text-xs'>
                         Smart Account Address: {pool.address}<br />
-                        Token Id: {pool.tokenId}
+                        Token Id: {pool.tokenId}<br />
+                        Token Passport: {pool.passportAddress}
                     </div>
 
 

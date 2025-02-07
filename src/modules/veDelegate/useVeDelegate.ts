@@ -28,6 +28,7 @@ export function useVeDelegate() {
     const [hasPool, setHasPool] = useState(false)
     const [tokenId, setTokenId] = useState("")
     const [address, setAddress] = useState("")
+    const [passportAddress, setPassportAddress] = useState("")
     const [accountBalance, setAccountBalance] = useState(getEmptyBalance())
     const [balance, setBalance] = useState(getEmptyBalance())
     const [chainId, setChainId] = useState('')
@@ -292,8 +293,41 @@ export function useVeDelegate() {
                 )
             )
         }
+
+
+        // active passport if user is not already delegating their passport to the smart wallet
+        if (passportAddress.toLowerCase() !== account?.toLowerCase()) {
+            // Delegate the Passport
+            clauses.push(
+                connex.thor.account(Addresses.VePassport).method({
+                    inputs: [
+                        { name: "delegatee", type: "address" }
+                    ],
+                    name: "delegatePassport",
+                    outputs: []
+                }).asClause(address)
+            )
+
+            // Accept the Passport on the Smart Wallet
+            clauses.push(
+                await executeOnSmartAccount(
+                    Addresses.VePassport,
+                    "0",
+                    connex.thor.account(Addresses.VOT3).method({
+                        inputs: [
+                            { name: "user", type: "address" }
+                        ],
+                        name: "acceptDelegation",
+                        outputs: []
+                    }).asClause(account).data,
+                    0,
+                    signingCallback
+                )
+            )
+        }
+
         return clauses
-    }, [connex, tokenId, address, account, executeOnSmartAccount])
+    }, [connex, tokenId, address, passportAddress, account, executeOnSmartAccount])
 
     /**
     *  build clauses for seperate transactions, for the given amount of B3TR and VOT3
@@ -359,8 +393,29 @@ export function useVeDelegate() {
                 )
             )
         }
+
+        // deactive passport if the future balance will be zero
+        if ((balance.b3tr + balance.vot3) - (b3tr + vot3) === 0n) {
+
+            // Revoke the Passport on the Smart Wallet
+            clauses.push(
+                await executeOnSmartAccount(
+                    Addresses.VePassport,
+                    "0",
+                    connex.thor.account(Addresses.VOT3).method({
+                        inputs: [],
+                        name: "revokeDelegation",
+                        outputs: []
+                    }).asClause().data,
+                    0,
+                    signingCallback
+                )
+            )
+        }
+
         return clauses
     }, [connex, address, balance, executeOnSmartAccount])
+
 
     /**
      * build voting support
@@ -474,6 +529,31 @@ export function useVeDelegate() {
     }, [tokenId, connex])
 
     /**
+    * get the passport currently delegated to the smart accounts wallet address
+    * if this is address zero, there is no passport
+    */
+    useEffect(() => {
+        if (!address) { return }
+
+        connex.thor
+            .account(Addresses.VePassport)
+            .method({
+                inputs: [{ name: "delegatee", type: "address" }],
+                name: "getDelegator",
+                outputs: [{ name: "user", type: "address" }],
+            })
+            .call(address)
+            .then(({ decoded: { user } }: { decoded: { user: string } }) => {
+                setPassportAddress(user);
+            })
+            .catch((error: Error) => {
+                setPassportAddress('')
+                console.error(error);
+            });
+    }, [address, connex])
+
+
+    /**
      * Get the chain ID for the smart account
      */
     useEffect(() => {
@@ -517,6 +597,7 @@ export function useVeDelegate() {
         hasPool,
         tokenId,
         address,
+        passportAddress,
 
         getVeBetterBalance,
         accountBalance,
