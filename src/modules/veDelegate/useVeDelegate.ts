@@ -600,7 +600,7 @@ export function useVeDelegate() {
                 setPassportAddress('')
                 console.error(error);
             });
-    }, [address, connex])
+    }, [address, connex, updateTrigger])
 
 
     /**

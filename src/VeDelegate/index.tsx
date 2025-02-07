@@ -15,7 +15,7 @@ export default function VeDelegate() {
 
         await connex.vendor.sign('tx', clauses).comment('Deposit VeBetterDAO Tokens').request()
 
-        // handle transaction and then you can optionally refetch
+        // handle transaction and then you can optionially refetch
         await connex.thor.ticker().next()
         pool.refetch()
     }
@@ -31,7 +31,7 @@ export default function VeDelegate() {
 
         await connex.vendor.sign('tx', clauses).comment('Withdraw VeBetterDAO Tokens').request()
 
-        // handle transaction and then you can optionally refetch
+        // handle transaction and then you can optionially refetch
         await connex.thor.ticker().next()
         pool.refetch()
     }
