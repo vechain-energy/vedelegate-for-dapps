@@ -29,3 +29,8 @@ export interface SignatureData {
     primaryType: "ExecuteWithAuthorization";
     message: ExecuteWithAuthorizationMessage;
 }
+
+export interface VotePreference {
+    appIds: string[]
+    percentages: number[]
+}

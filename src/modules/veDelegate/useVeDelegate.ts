@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useConnex, useWallet } from "@vechain/dapp-kit-react";
 import { Addresses } from "./config";
-import type { SigningCallbackFunc, Domain, ExecuteWithAuthorizationTypes, ExecuteWithAuthorizationMessage } from "./types";
+import type { SigningCallbackFunc, Domain, ExecuteWithAuthorizationTypes, ExecuteWithAuthorizationMessage, VotePreference } from "./types";
 
 const getEmptyBalance = () => ({
     b3tr: 0n,
@@ -30,6 +30,7 @@ export function useVeDelegate() {
     const [address, setAddress] = useState("")
     const [passportAddress, setPassportAddress] = useState("")
     const [accountBalance, setAccountBalance] = useState(getEmptyBalance())
+    const [votePreference, setVotePreference] = useState<VotePreference>({ appIds: [], percentages: [] })
     const [balance, setBalance] = useState(getEmptyBalance())
     const [chainId, setChainId] = useState('')
 
@@ -421,7 +422,7 @@ export function useVeDelegate() {
      * build voting support
      * if this is not used or an empty list, all votes will be equally split over all apps
      */
-    const buildSupportClauses = useCallback(async ({ appIds, percentages, signingCallback }: { appIds: string[], percentages: number[], signingCallback?: SigningCallbackFunc }) => {
+    const buildSupportClauses = useCallback(async ({ appIds, percentages, signingCallback }: VotePreference & { signingCallback?: SigningCallbackFunc }) => {
         // Ensure appIds and percentages are valid
         if (appIds.length !== percentages.length || appIds.length === 0) {
             throw new Error('Invalid input: appIds and percentages must be non-empty arrays of the same length');
@@ -458,6 +459,55 @@ export function useVeDelegate() {
 
         return clauses
     }, [connex, address, executeOnSmartAccount])
+
+    /**
+     * get the smart accounts wallet address
+     * this is always available, even even if the tokenId has not been minted yet
+     */
+    useEffect(() => {
+        if (!address) { return }
+
+        connex.thor
+            .account(Addresses.VeDelegateVotes)
+            .method({
+                "inputs": [
+                    { "internalType": "address", "name": "voter", "type": "address" }
+                ],
+                "name": "getVotes",
+                "outputs": [
+                    {
+                        "components": [
+                            {
+                                "internalType": "bytes32[]",
+                                "name": "appIds",
+                                "type": "bytes32[]"
+                            },
+                            {
+                                "internalType": "uint8[]",
+                                "name": "percentages",
+                                "type": "uint8[]"
+                            }
+                        ],
+                        "internalType": "struct Votes.Vote",
+                        "name": "preference",
+                        "type": "tuple"
+                    }
+                ],
+                "stateMutability": "view",
+                "type": "function"
+            })
+            .call(address)
+            .then(({ decoded: { preference } }: { decoded: { preference: { appIds: string[], percentages: string[] } } }) => {
+                setVotePreference({
+                    appIds: preference.appIds,
+                    percentages: preference.percentages.map(percentage => Number(percentage))
+                })
+            })
+            .catch((error: Error) => {
+                setVotePreference({ appIds: [], percentages: [] })
+                console.error(error);
+            });
+    }, [address, connex])
 
     /**
      * detect account changes
@@ -592,12 +642,12 @@ export function useVeDelegate() {
         }
     }, [address, getVeBetterBalance])
 
-
     return {
         hasPool,
         tokenId,
         address,
         passportAddress,
+        votePreference,
 
         getVeBetterBalance,
         accountBalance,
