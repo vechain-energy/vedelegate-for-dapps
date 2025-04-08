@@ -1,41 +1,39 @@
 import React, { createContext, useContext } from 'react';
+import { useVeDelegate } from '../hooks/useVeDelegate';
 import { VeDelegateTheme, defaultTheme } from '../theme';
-import { useVeDelegate } from '../useVeDelegate';
+import { VeDelegateState } from '../types';
 
 interface VeDelegateContextType {
   theme: VeDelegateTheme;
-  veDelegate: ReturnType<typeof useVeDelegate>;
+  veDelegateState: VeDelegateState;
 }
 
-const VeDelegateContext = createContext<VeDelegateContextType | null>(null);
+const VeDelegateContext = createContext<VeDelegateContextType | undefined>(undefined);
 
-export interface VeDelegateProviderProps {
-  children: React.ReactNode;
-  theme?: Partial<VeDelegateTheme>;
-}
-
-export function VeDelegateProvider({ children, theme = {} }: VeDelegateProviderProps) {
-  const veDelegate = useVeDelegate();
-  const mergedTheme = {
-    ...defaultTheme,
-    ...theme,
-    colors: {
-      ...defaultTheme.colors,
-      ...(theme.colors || {}),
-    },
-  };
-
-  return (
-    <VeDelegateContext.Provider value={{ theme: mergedTheme, veDelegate }}>
-      {children}
-    </VeDelegateContext.Provider>
-  );
-}
-
-export function useVeDelegateContext() {
+export const useVeDelegateContext = () => {
   const context = useContext(VeDelegateContext);
   if (!context) {
     throw new Error('useVeDelegateContext must be used within a VeDelegateProvider');
   }
   return context;
+};
+
+interface VeDelegateProviderProps {
+  children: React.ReactNode;
+  theme?: VeDelegateTheme;
+  appId: string;
+}
+
+export function VeDelegateProvider({ 
+  children,
+  theme = defaultTheme,
+  appId
+}: VeDelegateProviderProps) {
+  const veDelegateState = useVeDelegate(appId);
+
+  return (
+    <VeDelegateContext.Provider value={{ theme, veDelegateState }}>
+      {children}
+    </VeDelegateContext.Provider>
+  );
 } 

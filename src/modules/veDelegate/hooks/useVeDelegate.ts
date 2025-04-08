@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { useConnex, useWallet } from "@vechain/dapp-kit-react";
-import { Addresses } from "./config";
-import type { SigningCallbackFunc, Domain, ExecuteWithAuthorizationTypes, ExecuteWithAuthorizationMessage, VotePreference } from "./types";
+import { Addresses } from "../config";
+import type { SigningCallbackFunc, Domain, ExecuteWithAuthorizationTypes, ExecuteWithAuthorizationMessage, VotePreference, VoteMapping } from "../types";
+import { fetchAllEvents } from "../utils";
+import { useBeats } from "./useBeats";
 
 const getEmptyBalance = () => ({
     b3tr: 0n,
@@ -20,7 +22,7 @@ const getEmptyBalance = () => ({
     availableVot3AsNumber: 0,
 })
 
-export function useVeDelegate() {
+export function useVeDelegate(appId: string) {
     const { account } = useWallet()
     const connex = useConnex()
 
@@ -30,11 +32,20 @@ export function useVeDelegate() {
     const [address, setAddress] = useState("")
     const [passportAddress, setPassportAddress] = useState("")
     const [accountBalance, setAccountBalance] = useState(getEmptyBalance())
+    const [rewardsReceived, setRewardsReceived] = useState(0)
     const [votePreference, setVotePreference] = useState<VotePreference>({ appIds: [], percentages: [] })
+    const [voteMapping, setVoteMapping] = useState<VoteMapping>({})
     const [balance, setBalance] = useState(getEmptyBalance())
     const [chainId, setChainId] = useState('')
+    const [isLoading, setIsLoading] = useState(true)
+    const [hasVotedForPlatform, setHasVotedForPlatform] = useState(false)
 
     const refetch = useCallback(() => setUpdateTrigger(Date.now()), [])
+
+    const beats = useBeats([address])
+    useEffect(() => {
+        if (beats) { refetch() }
+    }, [beats, refetch])
 
 
     /**
@@ -225,7 +236,7 @@ export function useVeDelegate() {
                         name: "createPool",
                         outputs: []
                     })
-                    .asClause(tokenId, account, '')
+                    .asClause(tokenId, account, `embed:${appId}`)
             )
         }
 
@@ -328,7 +339,7 @@ export function useVeDelegate() {
         }
 
         return clauses
-    }, [connex, tokenId, address, passportAddress, account, executeOnSmartAccount])
+    }, [connex, tokenId, address, passportAddress, account, executeOnSmartAccount, appId])
 
     /**
     *  build clauses for seperate transactions, for the given amount of B3TR and VOT3
@@ -419,6 +430,79 @@ export function useVeDelegate() {
 
 
     /**
+     * Check if the user has a vote for the platform app
+     */
+    const checkHasVotedForPlatform = useCallback(() => {
+        return votePreference.appIds.some(
+            currentAppId => currentAppId.toLowerCase() === appId.toLowerCase()
+        );
+    }, [votePreference, appId]);
+
+    /**
+     * Update the hasVotedForPlatform state whenever votePreference changes
+     */
+    useEffect(() => {
+        setHasVotedForPlatform(checkHasVotedForPlatform());
+    }, [votePreference, checkHasVotedForPlatform]);
+
+    /**
+     * Create vote mapping from appIds and percentages
+     */
+    useEffect(() => {
+        const mapping: VoteMapping = {};
+        
+        if (votePreference.appIds && votePreference.percentages) {
+            votePreference.appIds.forEach((appId, index) => {
+                if (index < votePreference.percentages.length) {
+                    mapping[appId] = votePreference.percentages[index];
+                }
+            });
+        }
+        
+        setVoteMapping(mapping);
+    }, [votePreference]);
+
+    /**
+     * Load the vote information from the VeDelegateVotes contract
+     */
+    useEffect(() => {
+        if (!address) { return }
+
+        connex.thor
+            .account(Addresses.VeDelegateVotes)
+            .method({
+                inputs: [{ name: "voter", type: "address" }],
+                name: "getVotes",
+                outputs: [
+                    {
+                        components: [
+                            { name: "ids", type: "bytes32[]" },
+                            { name: "percentages", type: "uint8[]" }
+                        ],
+                        name: "",
+                        type: "tuple"
+                    }
+                ]
+            })
+            .call(address)
+            .then((result) => {
+                if (result && result.decoded && result.decoded[0]) {
+                    const voteData = result.decoded[0];
+                    setVotePreference({
+                        appIds: voteData.ids || [],
+                        percentages: voteData.percentages?.map((p: any) => Number(p)) || []
+                    });
+                } else {
+                    setVotePreference({ appIds: [], percentages: [] });
+                }
+            })
+            .catch((error) => {
+                console.error("Error loading vote data:", error);
+                setVotePreference({ appIds: [], percentages: [] });
+            });
+    }, [address, connex, updateTrigger]);
+
+    /**
      * build voting support
      * if this is not used or an empty list, all votes will be equally split over all apps
      */
@@ -458,56 +542,7 @@ export function useVeDelegate() {
         )
 
         return clauses
-    }, [connex, address, executeOnSmartAccount])
-
-    /**
-     * get the smart accounts wallet address
-     * this is always available, even even if the tokenId has not been minted yet
-     */
-    useEffect(() => {
-        if (!address) { return }
-
-        connex.thor
-            .account(Addresses.VeDelegateVotes)
-            .method({
-                "inputs": [
-                    { "internalType": "address", "name": "voter", "type": "address" }
-                ],
-                "name": "getVotes",
-                "outputs": [
-                    {
-                        "components": [
-                            {
-                                "internalType": "bytes32[]",
-                                "name": "appIds",
-                                "type": "bytes32[]"
-                            },
-                            {
-                                "internalType": "uint8[]",
-                                "name": "percentages",
-                                "type": "uint8[]"
-                            }
-                        ],
-                        "internalType": "struct Votes.Vote",
-                        "name": "preference",
-                        "type": "tuple"
-                    }
-                ],
-                "stateMutability": "view",
-                "type": "function"
-            })
-            .call(address)
-            .then(({ decoded: { preference } }: { decoded: { preference: { appIds: string[], percentages: string[] } } }) => {
-                setVotePreference({
-                    appIds: preference.appIds,
-                    percentages: preference.percentages.map(percentage => Number(percentage))
-                })
-            })
-            .catch((error: Error) => {
-                setVotePreference({ appIds: [], percentages: [] })
-                console.error(error);
-            });
-    }, [address, connex])
+    }, [connex, executeOnSmartAccount])
 
     /**
      * detect account changes
@@ -516,11 +551,14 @@ export function useVeDelegate() {
         if (!account || !connex) {
             setHasPool(false)
             setAccountBalance(getEmptyBalance())
+            setIsLoading(false)
         }
         else {
+            setIsLoading(true)
             getVeBetterBalance(account)
                 .then(setAccountBalance)
                 .catch(() => { /* ignore */ })
+                .finally(() => setIsLoading(false))
         }
     }, [account, connex, getVeBetterBalance])
 
@@ -621,7 +659,7 @@ export function useVeDelegate() {
             })
             .call()
             .then(({ decoded }: { decoded: [BigInt] }) => {
-                setChainId(decoded[0].toString());
+                setChainId(String(decoded[0]));
             })
             .catch(() => {
                 setChainId('');
@@ -634,29 +672,85 @@ export function useVeDelegate() {
     useEffect(() => {
         if (!address) {
             setBalance(getEmptyBalance())
+            setIsLoading(false)
         }
         else {
+            setIsLoading(true)
             getVeBetterBalance(address)
                 .then(setBalance)
                 .catch(() => { /* ignore */ })
+                .finally(() => setIsLoading(false))
         }
     }, [address, getVeBetterBalance])
 
+    /**
+    * get the past rewards received by the staking wallet
+    */
+    useEffect(() => {
+        if (!address) { return }
+
+
+        fetchAllEvents(
+            connex.thor
+                .account(Addresses.Rewarder)
+                .event({
+                    "anonymous": false,
+                    "inputs": [
+                        {
+                            "indexed": true,
+                            "internalType": "uint256",
+                            "name": "cycle",
+                            "type": "uint256"
+                        },
+                        {
+                            "indexed": true,
+                            "internalType": "address",
+                            "name": "voter",
+                            "type": "address"
+                        },
+                        {
+                            "indexed": false,
+                            "internalType": "uint256",
+                            "name": "reward",
+                            "type": "uint256"
+                        }
+                    ],
+                    "name": "RewardClaimed",
+                    "type": "event"
+                })
+                .filter([{ voter: address }])
+        ).then((rewards: { decoded: { cycle: string, voter: string, reward: string } }[]) => {
+            const totalRewards = rewards.reduce((sum, { decoded }) => sum + BigInt(decoded.reward), 0n);
+            const totalRewardsAsNumber = Number(totalRewards / BigInt(1e18))
+            setRewardsReceived(totalRewardsAsNumber)
+        }).catch((error: Error) => {
+            console.error(error);
+        });
+
+    }, [address, connex])
+
+
     return {
+        account,
         hasPool,
         tokenId,
         address,
         passportAddress,
         votePreference,
-
-        getVeBetterBalance,
+        voteMapping,
+        hasVotedForPlatform,
         accountBalance,
         balance,
-
+        rewardsReceived,
+        chainId,
+        isLoading,
+        appId,
+        refetch,
+        executeOnSmartAccount,
+        buildSmartAccountSignature,
+        getVeBetterBalance,
         buildDepositClauses,
         buildWithdrawClauses,
-        buildSupportClauses,
-
-        refetch
+        buildSupportClauses
     }
 };
