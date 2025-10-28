@@ -1,6 +1,6 @@
 import { DAppKitProvider } from '@vechain/dapp-kit-react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { NODE_URL, NETWORK, WALLET_CONNECT_PROJECT_ID, APP_TITLE, APP_DESCRIPTION, APP_ICONS } from '~/config';
+import { NODE_URL, WALLET_CONNECT_PROJECT_ID, APP_TITLE, APP_DESCRIPTION, APP_ICONS } from '~/config';
 import { Helmet } from "react-helmet";
 import Layout from './Layout';
 import VeDelegate from './VeDelegate';
@@ -39,8 +39,7 @@ function Providers({ children }: { children: React.ReactNode }) {
         <QueryClientProvider client={queryClient}>
             <DAppKitProvider
                 // the network & node to connect to
-                nodeUrl={NODE_URL}
-                genesis={NETWORK}
+                node={NODE_URL}
                 // remember last connected address on page reload
                 usePersistence={true}
                 // optionally enable walletConnect, which will be used for mobile wallets

@@ -232,17 +232,17 @@ export function VeDelegateButton({ className, mode = 'dark', primaryColor = '#ea
     if (hex.length === 3) {
       hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
     }
-    
+
     // Parse the hex values
     const r = parseInt(hex.substring(0, 2), 16);
     const g = parseInt(hex.substring(2, 4), 16);
     const b = parseInt(hex.substring(4, 6), 16);
-    
+
     // Adjust the color
     const adjustR = Math.max(0, Math.min(255, r + amount));
     const adjustG = Math.max(0, Math.min(255, g + amount));
     const adjustB = Math.max(0, Math.min(255, b + amount));
-    
+
     // Convert back to hex
     return `#${adjustR.toString(16).padStart(2, '0')}${adjustG.toString(16).padStart(2, '0')}${adjustB.toString(16).padStart(2, '0')}`;
   }
@@ -263,8 +263,8 @@ export function VeDelegateButton({ className, mode = 'dark', primaryColor = '#ea
         <div style={infoContainerStyle}>
           Connect your wallet to start earning <span style={highlightStyle}>~{calculator.apy}% APY</span> in VOT3 rewards
         </div>
-        <div style={buttonStyle}>Connect Wallet</div>
-      </div>
+        <div style={{ ...buttonStyle, opacity: 0.5 }}>Please Connect your Wallet first</div>
+      </div >
     );
   }
 
@@ -321,7 +321,7 @@ export function VeDelegateButton({ className, mode = 'dark', primaryColor = '#ea
         <div style={headerStyle}>
           <span>Stake to Earn</span>
           <img
-            src="https://vechain.github.io/token-registry/assets/3d55edb42b09a634f7f2f26756a02571de901a5b.png"
+            src="https://vechain.github.io/token-registry/assets/5a9eb5e11751a649ca00298f3237c4624712af75.png"
             alt="B3TR Token"
             style={tokenIconStyle}
           />

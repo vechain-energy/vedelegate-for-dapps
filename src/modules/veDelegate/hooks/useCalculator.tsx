@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
 import { Addresses } from "../config";
-import { useConnex } from "@vechain/dapp-kit-react";
+import { useThor } from "@vechain/dapp-kit-react";
 import { useRound } from "./useRound";
+import { Address, ABIItem, ABIFunction } from "@vechain/sdk-core";
 
 export const useCalculator = () => {
     const [currentRoundId, setCurrentRoundId] = useState(0);
@@ -9,7 +10,7 @@ export const useCalculator = () => {
     const round = useRound({ roundId: currentRoundId - 1 })
     const [apy, setAPY] = useState(0)
     const [actionMultiplier, setActionMultiplier] = useState(1)
-    const connex = useConnex()
+    const thor = useThor()
 
     useEffect(() => {
         if (!round?.data) { return }
@@ -19,49 +20,32 @@ export const useCalculator = () => {
     }, [round])
 
     useEffect(() => {
-        connex.thor
-            .account(Addresses.AllocationVoting)
-            .method({
-                inputs: [],
-                name: "currentRoundId",
-                outputs: [{ name: "roundId", type: "uint256" }],
-            })
-            .call()
-            .then(({ decoded: { roundId } }: { decoded: { roundId: string } }) => {
+        thor.contracts.executeCall(
+            Addresses.AllocationVoting,
+            ABIItem.ofSignature(ABIFunction, 'function currentRoundId() view returns (uint256)'),
+            []
+        )
+            .then(({ result: { plain: roundId } }) => {
                 setCurrentRoundId(Number(roundId));
             })
             .catch((error: Error) => {
                 console.error(error);
             });
-    }, [connex]);
+    }, [thor]);
 
     useEffect(() => {
         if (!currentRoundId) { return }
         const fetchEmission = async () => {
-            const emissionResponse = await connex.thor.account(Addresses.Emission).method({
-                "constant": true,
-                "inputs": [
-                    {
-                        "name": "roundId",
-                        "type": "uint256"
-                    }
-                ],
-                "name": "getVote2EarnAmount",
-                "outputs": [
-                    {
-                        "name": "",
-                        "type": "uint256"
-                    }
-                ],
-                "payable": false,
-                "stateMutability": "view",
-                "type": "function"
-            }).call(currentRoundId);
-            setEmission(BigInt(emissionResponse.decoded[0]));
+            const emissionResponse = await thor.contracts.executeCall(
+                Addresses.Emission,
+                ABIItem.ofSignature(ABIFunction, 'function getVote2EarnAmount(uint256 roundId) view returns (uint256)'),
+                [currentRoundId]
+            );
+            setEmission(BigInt(emissionResponse.result.plain as bigint));
         };
 
         fetchEmission();
-    }, [connex, currentRoundId])
+    }, [thor, currentRoundId])
 
     const calculateReward = useMemo(() => (amount: number, multiplier: number) => {
         if (!round.data) { return 0 }

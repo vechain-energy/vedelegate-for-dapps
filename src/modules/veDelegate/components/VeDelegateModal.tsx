@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useVeDelegateContext } from './VeDelegateProvider';
 import { Constants } from '../config';
-import { useConnex } from '@vechain/dapp-kit-react';
+import { useWallet } from '@vechain/dapp-kit-react';
 import { getNextMonday, getNextMondayAfterNextMonday } from '../utils';
 import { useApps } from '../hooks/useApps';
 
@@ -28,8 +28,7 @@ export function VeDelegateModal({ isOpen, onClose, mode = 'dark', primaryColor =
     hasVotedForPlatform,
     appId
   } = veDelegateState;
-  const connex = useConnex();
-
+  const { signer } = useWallet();
   // Fetch app data for all voted apps
   const { data: appData, isLoading: appsLoading } = useApps({
     appIds: [...votePreference.appIds, appId]
@@ -274,7 +273,7 @@ export function VeDelegateModal({ isOpen, onClose, mode = 'dark', primaryColor =
 
       if (activeTab === 'stake') {
         // Create deposit transaction
-        if (connex && connex.vendor) {
+        if (signer) {
           console.log('Executing deposit transaction...');
 
           // Get all clauses needed for the deposit
@@ -299,23 +298,21 @@ export function VeDelegateModal({ isOpen, onClose, mode = 'dark', primaryColor =
           }
 
           // Execute all clauses in a single transaction
-          const depositTx = await connex.vendor
-            .sign('tx', clauses)
-            .comment('Deposit B3TR tokens')
-            .request();
+          const depositTx = await signer.sendTransaction({
+            clauses,
+            comment: 'Deposit B3TR tokens'
+          });
 
           if (depositTx) {
-            // Wait for the transaction to be processed
-            await connex.thor.ticker().next();
             setTransactionSuccess(true);
             await refetch();
           }
         } else {
-          throw new Error('Connex not available');
+          throw new Error('Signer not available');
         }
       } else {
         // Create withdraw transaction
-        if (connex && connex.vendor) {
+        if (signer) {
           console.log('Executing withdrawal transaction...');
 
           const withdrawClauses = await buildWithdrawClauses({
@@ -325,14 +322,12 @@ export function VeDelegateModal({ isOpen, onClose, mode = 'dark', primaryColor =
           })
 
           if (withdrawClauses) {
-            const withdrawTx = await connex.vendor
-              .sign('tx', withdrawClauses)
-              .comment('Withdraw B3TR tokens')
-              .request();
+            const withdrawTx = await signer.sendTransaction({
+              clauses: withdrawClauses,
+              comment: 'Withdraw B3TR tokens'
+            });
 
             if (withdrawTx) {
-              // Wait for the transaction to be processed
-              await connex.thor.ticker().next();
               setTransactionSuccess(true);
               await refetch();
             }
@@ -340,7 +335,7 @@ export function VeDelegateModal({ isOpen, onClose, mode = 'dark', primaryColor =
             throw new Error('Failed to create withdrawal transaction');
           }
         } else {
-          throw new Error('Connex not available');
+          throw new Error('Signer not available');
         }
       }
     } catch (err) {
@@ -411,7 +406,7 @@ export function VeDelegateModal({ isOpen, onClose, mode = 'dark', primaryColor =
     toggleDropdown(false);
     // Call the handler directly when selecting a percentage
     // Using handleAddPlatformVote directly to avoid dependency issues
-    if (!account || !connex || !connex.vendor || isLoading) return;
+    if (!account || !signer || isLoading) return;
 
     setIsLoading(true);
     setError(null);
@@ -459,14 +454,12 @@ export function VeDelegateModal({ isOpen, onClose, mode = 'dark', primaryColor =
           throw new Error('Failed to create vote update transaction');
         }
         
-        const voteTx = await connex.vendor
-          .sign('tx', clauses)
-          .comment(`Vote with ${platformPercentage}% for ${platformAppName}`)
-          .request();
+        const voteTx = await signer.sendTransaction({
+          clauses,
+          comment: `Vote with ${platformPercentage}% for ${platformAppName}`
+        });
           
         if (voteTx) {
-          // Wait for the transaction to be processed
-          await connex.thor.ticker().next();
           setVoteUpdateSuccess(true);
           await refetch();
         }
@@ -1164,7 +1157,7 @@ export function VeDelegateModal({ isOpen, onClose, mode = 'dark', primaryColor =
               <span>Balance: {activeTab === 'stake' ? accountBalance.b3trAsNumber : balance.convertedB3trAsNumber}</span>
               <span style={b3trLogoStyle}>
                 <img
-                  src="https://vechain.github.io/token-registry/assets/3d55edb42b09a634f7f2f26756a02571de901a5b.png"
+                  src="https://vechain.github.io/token-registry/assets/5a9eb5e11751a649ca00298f3237c4624712af75.png"
                   alt="B3TR Token"
                   width="24"
                   height="24"
