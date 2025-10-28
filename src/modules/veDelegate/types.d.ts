@@ -64,7 +64,6 @@ export interface VeDelegateState {
     hasVotedForPlatform: boolean;
     accountBalance: Balance;
     balance: Balance;
-    rewardsReceived: number;
     isLoading: boolean;
     appId: string;
     refetch: () => void;

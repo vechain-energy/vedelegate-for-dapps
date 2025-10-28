@@ -11,7 +11,7 @@ interface VeDelegateButtonProps {
 
 export function VeDelegateButton({ className, mode = 'dark', primaryColor = '#ea580c' }: VeDelegateButtonProps) {
   const { veDelegateState } = useVeDelegateContext();
-  const { account, hasPool, accountBalance, balance, rewardsReceived } = veDelegateState;
+  const { account, hasPool, accountBalance, balance } = veDelegateState;
   const calculator = useCalculator();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -341,7 +341,7 @@ export function VeDelegateButton({ className, mode = 'dark', primaryColor = '#ea
         <div style={infoContainerStyle}>
           {hasPool && balance.convertedB3trAsNumber > 0 ? (
             <>
-              You've earned <span style={highlightStyle}>{Math.round(rewardsReceived).toLocaleString()} B3TR</span> · Current APY is <span style={highlightStyle}>~{calculator.apy}%</span>
+              Current APY is <span style={highlightStyle}>~{calculator.apy}%</span>
             </>
           ) : (
             <>

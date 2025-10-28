@@ -32,7 +32,6 @@ export function useVeDelegate(appId: string) {
     const [address, setAddress] = useState("")
     const [passportAddress, setPassportAddress] = useState("")
     const [accountBalance, setAccountBalance] = useState(getEmptyBalance())
-    const [rewardsReceived, setRewardsReceived] = useState(0)
     const [votePreference, setVotePreference] = useState<VotePreference>({ appIds: [], percentages: [] })
     const [voteMapping, setVoteMapping] = useState<VoteMapping>({})
     const [balance, setBalance] = useState(getEmptyBalance())
@@ -599,18 +598,6 @@ export function useVeDelegate(appId: string) {
         }
     }, [address, getVeBetterBalance])
 
-    /**
-    * get the past rewards received by the staking wallet
-    */
-    useEffect(() => {
-        if (!address) { return }
-
-
-        // For now, we'll skip the rewards fetching as it requires updating the fetchAllEvents utility
-        // TODO: Update fetchAllEvents to work with SDK v2
-        setRewardsReceived(0);
-
-    }, [address, thor])
 
 
     return {
@@ -624,7 +611,6 @@ export function useVeDelegate(appId: string) {
         hasVotedForPlatform,
         accountBalance,
         balance,
-        rewardsReceived,
         chainId,
         isLoading,
         appId,
