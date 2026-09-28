@@ -60,6 +60,9 @@ export interface VeDelegateState {
     address: string;
     passportAddress: string;
     votePreference: VotePreference;
+    votesLoading: boolean;
+    votesError: string | null;
+    refreshVotes: () => Promise<void>;
     voteMapping: VoteMapping;
     hasVotedForPlatform: boolean;
     accountBalance: Balance;

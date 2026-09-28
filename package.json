@@ -3,9 +3,10 @@
   "version": "1.0.0",
   "description": "",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "vitest run",
     "start": "parcel src/index.html",
-    "build": "parcel build src/index.html"
+    "build": "parcel build src/index.html",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [],
   "author": "",
@@ -32,15 +33,20 @@
     "typescript": "^5.4.5"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^26.5.1",
     "@types/react-helmet": "^6.1.11",
     "buffer": "^6.0.3",
     "crypto-browserify": "^3.12.0",
     "https-browserify": "^1.0.0",
+    "jsdom": "^30.0.1",
     "parcel-resolver-tspaths": "^0.0.9",
     "process": "^0.11.10",
     "stream-browserify": "^3.0.0",
     "stream-http": "^3.2.0",
     "url": "^0.11.3",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.0",
     "vm-browserify": "^1.1.2"
   }
 }

@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { useThor, useWallet } from "@vechain/dapp-kit-react";
 import { Addresses } from "../config";
 import type { SigningCallbackFunc, Domain, ExecuteWithAuthorizationTypes, ExecuteWithAuthorizationMessage, VotePreference, VoteMapping } from "../types";
+import { useVotePreferences } from './useVotePreferences';
+import { validateVotes } from '../voting';
 import { useBeats } from "./useBeats";
 import { Address, ABIItem, ABIFunction, Clause } from "@vechain/sdk-core";
 
@@ -27,12 +29,14 @@ export function useVeDelegate(appId: string) {
     const thor = useThor()
 
     const [updateTrigger, setUpdateTrigger] = useState(0)
-    const [hasPool, setHasPool] = useState(false)
-    const [tokenId, setTokenId] = useState("")
-    const [address, setAddress] = useState("")
+    const [pool, setPool] = useState({ owner: '', thor, hasPool: false, tokenId: '', address: '' });
+    const currentPool = pool.owner === account && pool.thor === thor;
+    const hasPool = currentPool && pool.hasPool;
+    const tokenId = currentPool ? pool.tokenId : '';
+    const address = currentPool ? pool.address : '';
     const [passportAddress, setPassportAddress] = useState("")
     const [accountBalance, setAccountBalance] = useState(getEmptyBalance())
-    const [votePreference, setVotePreference] = useState<VotePreference>({ appIds: [], percentages: [] })
+    const { votePreference, votesLoading, votesError, refreshVotes } = useVotePreferences(thor, address, updateTrigger);
     const [voteMapping, setVoteMapping] = useState<VoteMapping>({})
     const [balance, setBalance] = useState(getEmptyBalance())
     const [chainId, setChainId] = useState('')
@@ -410,54 +414,16 @@ export function useVeDelegate(appId: string) {
     }, [votePreference]);
 
     /**
-     * Load the vote information from the VeDelegateVotes contract
-     */
-    useEffect(() => {
-        if (!address) { return }
-
-        thor.contracts.executeCall(
-            Addresses.VeDelegateVotes,
-            ABIItem.ofSignature(ABIFunction, 'function getVotes(address voter) view returns ((bytes32[],uint8[]))'),
-            [address]
-        )
-            .then(({ result: { plain: voteData } }) => {
-                if (voteData && Array.isArray(voteData) && voteData.length >= 2) {
-                    setVotePreference({
-                        appIds: voteData[0] || [],
-                        percentages: voteData[1]?.map((p: any) => Number(p)) || []
-                    });
-                } else {
-                    setVotePreference({ appIds: [], percentages: [] });
-                }
-            })
-            .catch((error) => {
-                console.error("Error loading vote data:", error);
-                setVotePreference({ appIds: [], percentages: [] });
-            });
-    }, [address, thor, updateTrigger]);
-
-    /**
      * build voting support
-     * if this is not used or an empty list, all votes will be equally split over all apps
+     * Explicit allocations must total 100%; zero entries are omitted.
      */
     const buildSupportClauses = useCallback(async ({ appIds, percentages, signingCallback }: VotePreference & { signingCallback?: SigningCallbackFunc }) => {
-        // Ensure appIds and percentages are valid
-        if (appIds.length !== percentages.length || appIds.length === 0) {
-            throw new Error('Invalid input: appIds and percentages must be non-empty arrays of the same length');
-        }
-
-        // Convert percentages to uint8 array
-        const uint8Percentages = percentages.map(p => {
-            if (p < 0 || p > 100) {
-                throw new Error('Percentages must be between 0 and 100');
-            }
-            return Math.floor(p);
-        });
+        const valid = validateVotes({ appIds, percentages });
 
         const data = Clause.callFunction(
             Address.of(Addresses.VeDelegateVotes),
             ABIItem.ofSignature(ABIFunction, 'function castVotes(bytes32[] appIds, uint8[] percentages)'),
-            [appIds, uint8Percentages]
+            [valid.appIds, valid.percentages]
         ).data;
 
         // Create the clause for casting votes
@@ -480,7 +446,6 @@ export function useVeDelegate(appId: string) {
      */
     useEffect(() => {
         if (!account || !thor) {
-            setHasPool(false)
             setAccountBalance(getEmptyBalance())
             setIsLoading(false)
         }
@@ -493,49 +458,29 @@ export function useVeDelegate(appId: string) {
         }
     }, [account, thor, getVeBetterBalance])
 
-    /**
-     * get first token owned, will fail if there is none
-     * directly using tokenOfOwnerByIndex without using balanceOf first
-     * will save one network call
-     */
+    // Resolve the pool as one account-scoped read to prevent stale wallet responses.
     useEffect(() => {
-        if (!account) { return }
-
-        thor.contracts.executeCall(
-            Addresses.VeDelegate,
-            ABIItem.ofSignature(ABIFunction, 'function tokenOfOwnerByIndex(address owner, uint256 tokenIndex) view returns (uint256)'),
-            [account, 0]
-        )
-            .then(({ result: { plain: tokenId } }) => {
-                setTokenId(String(tokenId));
-                setHasPool(true)
-            })
-            .catch(() => {
-                setTokenId(BigInt(account).toString())
-                setHasPool(false)
-            });
-    }, [account, thor])
-
-    /**
-     * get the smart accounts wallet address
-     * this is always available, even even if the tokenId has not been minted yet
-     */
-    useEffect(() => {
-        if (!tokenId) { return }
-
-        thor.contracts.executeCall(
-            Addresses.VeDelegate,
-            ABIItem.ofSignature(ABIFunction, 'function getPoolAddress(uint256 tokenId) view returns (address)'),
-            [tokenId]
-        )
-            .then(({ result: { plain: tbaAddress } }) => {
-                setAddress(String(tbaAddress));
-            })
-            .catch((error: Error) => {
-                setAddress('')
-                console.error(error);
-            });
-    }, [tokenId, thor])
+        if (!account) return;
+        let cancelled = false;
+        void (async () => {
+            let resolvedToken: string;
+            let exists = true;
+            try {
+                const response = await thor.contracts.executeCall(Addresses.VeDelegate,
+                    ABIItem.ofSignature(ABIFunction, 'function tokenOfOwnerByIndex(address owner, uint256 tokenIndex) view returns (uint256)'), [account, 0]);
+                resolvedToken = String(response.result.plain);
+            } catch {
+                resolvedToken = BigInt(account).toString();
+                exists = false;
+            }
+            const response = await thor.contracts.executeCall(Addresses.VeDelegate,
+                ABIItem.ofSignature(ABIFunction, 'function getPoolAddress(uint256 tokenId) view returns (address)'), [resolvedToken]);
+            if (!cancelled) setPool({ owner: account, thor, hasPool: exists, tokenId: resolvedToken, address: String(response.result.plain) });
+        })().catch(() => {
+            if (!cancelled) setPool({ owner: account, thor, hasPool: false, tokenId: '', address: '' });
+        });
+        return () => { cancelled = true; };
+    }, [account, thor, updateTrigger]);
 
     /**
     * get the passport currently delegated to the smart accounts wallet address
@@ -607,6 +552,9 @@ export function useVeDelegate(appId: string) {
         address,
         passportAddress,
         votePreference,
+        votesLoading,
+        votesError,
+        refreshVotes,
         voteMapping,
         hasVotedForPlatform,
         accountBalance,
