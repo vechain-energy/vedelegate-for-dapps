@@ -1,4 +1,5 @@
 export const Addresses = {
+    X2EarnApps: '0x8392B7CCc763dB03b47afcD8E8f5e24F9cf0554D',
     VeDelegate: '0xfc32a9895C78CE00A1047d602Bd81Ea8134CC32b',
     VeDelegateVotes: '0xeb71148c9B3cd57e228c2152d79f6e78F5F1ef9a',
     VePassport: '0x35a267671d8EDD607B2056A9a13E7ba7CF53c8b3',

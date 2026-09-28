@@ -4,7 +4,7 @@ import { useVeDelegateContext } from './VeDelegateProvider';
 import { Constants } from '../config';
 import { useWallet } from '@vechain/dapp-kit-react';
 import { getNextMonday, getNextMondayAfterNextMonday } from '../utils';
-import { useApps } from '../hooks/useApps';
+import { VotingPanel } from './VotingPanel';
 
 interface VeDelegateModalProps {
   isOpen: boolean;
@@ -24,93 +24,16 @@ export function VeDelegateModal({ isOpen, onClose, mode = 'dark', primaryColor =
     buildDepositClauses,
     buildWithdrawClauses,
     buildSupportClauses,
-    votePreference,
-    hasVotedForPlatform,
     appId
   } = veDelegateState;
   const { signer } = useWallet();
-  // Fetch app data for all voted apps
-  const { data: appData, isLoading: appsLoading } = useApps({
-    appIds: [...votePreference.appIds, appId]
-  });
-
-  // Find platform app name if available
-  const getPlatformAppData = () => {
-    if (appData && appId in appData) {
-      return appData[appId];
-    }
-    return null;
-  };
-
-  const platformApp = getPlatformAppData();
-  const platformAppName = platformApp && platformApp.metadata?.title
-    ? platformApp.metadata.title
-    : platformApp?.name || 'this platform';
-
-  const [activeTab, setActiveTab] = useState<'stake' | 'unstake'>('stake');
+  const [activeTab, setActiveTab] = useState<'stake' | 'unstake' | 'voting'>('stake');
   const [amount, setAmount] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [modalRoot, setModalRoot] = useState<HTMLElement | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [transactionSuccess, setTransactionSuccess] = useState(false);
-  const [voteUpdateSuccess, setVoteUpdateSuccess] = useState(false);
-  const [votePercentage, setVotePercentage] = useState<number>(20);
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [isDropdownAnimating, setIsDropdownAnimating] = useState(false);
-  const dropdownRef = React.useRef<HTMLDivElement>(null);
-
-  // Function to handle dropdown opening and closing with animation
-  const toggleDropdown = (open: boolean) => {
-    // If explicitly setting to a state (open or closed)
-    if (typeof open === 'boolean') {
-      // If trying to close
-      if (!open && isDropdownOpen) {
-        if (!isDropdownAnimating) {
-          setIsDropdownAnimating(true);
-          if (dropdownRef.current) {
-            dropdownRef.current.className = 'dropdown-exit';
-            setTimeout(() => {
-              setIsDropdownOpen(false);
-              setIsDropdownAnimating(false);
-            }, 200);
-          } else {
-            setIsDropdownOpen(false);
-            setIsDropdownAnimating(false);
-          }
-        }
-      } 
-      // If trying to open and not already open
-      else if (open && !isDropdownOpen) {
-        setIsDropdownOpen(true);
-      }
-    }
-  };
-
-  // Click handler with animation - ensure this toggles the dropdown state
-  const handleDropdownClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    
-    // When clicking the button, directly toggle the dropdown state without using the toggle function
-    if (isDropdownOpen) {
-      // Close the dropdown
-      setIsDropdownAnimating(true);
-      if (dropdownRef.current) {
-        dropdownRef.current.className = 'dropdown-exit';
-        setTimeout(() => {
-          setIsDropdownOpen(false);
-          setIsDropdownAnimating(false);
-        }, 200);
-      } else {
-        setIsDropdownOpen(false);
-        setIsDropdownAnimating(false);
-      }
-    } else {
-      // Open the dropdown
-      setIsDropdownOpen(true);
-    }
-  };
-
   // Auto-fill 100% of user's balance when the modal opens
   useEffect(() => {
     if (isOpen && account) {
@@ -159,21 +82,6 @@ export function VeDelegateModal({ isOpen, onClose, mode = 'dark', primaryColor =
     };
   }, []);
 
-  // Handle clicking outside dropdown to close it
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
-      if (isDropdownOpen && !target.closest('.percentage-dropdown-container')) {
-        toggleDropdown(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isDropdownOpen]);
-
   useEffect(() => {
     if (isOpen && isMobile) {
       document.body.classList.add('modal-open');
@@ -186,16 +94,13 @@ export function VeDelegateModal({ isOpen, onClose, mode = 'dark', primaryColor =
     };
   }, [isOpen, isMobile]);
 
-  // Close dropdown when modal closes
   useEffect(() => {
-    if (!isOpen) {
-      toggleDropdown(false);
-    }
-  }, [isOpen]);
+    if (!hasPool) setActiveTab('stake');
+  }, [hasPool, account]);
 
   if (!isOpen || !modalRoot) return null;
 
-  const handleTabChange = (tab: 'stake' | 'unstake') => {
+  const handleTabChange = (tab: 'stake' | 'unstake' | 'voting') => {
     setActiveTab(tab);
     setTransactionSuccess(false);
 
@@ -390,86 +295,6 @@ export function VeDelegateModal({ isOpen, onClose, mode = 'dark', primaryColor =
     }
 
     return false;
-  };
-
-  // Check if the user has votes but hasn't voted for the platform
-  const showPlatformVoteNotification =
-    hasPool &&
-    votePreference.appIds.length > 0 &&
-    !hasVotedForPlatform &&
-    !voteUpdateSuccess &&
-    !appsLoading;
-
-  // Option selection with animation
-  const handleOptionSelect = (percent: number) => {
-    setVotePercentage(percent);
-    toggleDropdown(false);
-    // Call the handler directly when selecting a percentage
-    // Using handleAddPlatformVote directly to avoid dependency issues
-    if (!account || !signer || isLoading) return;
-
-    setIsLoading(true);
-    setError(null);
-
-    const platformPercentage = percent;
-    
-    // We'll handle the vote update logic here directly
-    (async () => {
-      try {
-        // Create a new set of appIds and percentages that includes the platform app
-        // Allocate the selected percentage to the platform app and distribute the remaining proportionally
-        const remainingPercentage = 100 - platformPercentage;
-        const totalExistingPercentage = votePreference.percentages.reduce((sum, p) => sum + p, 0);
-        const newPercentages: number[] = [];
-        
-        // Keep existing votes but reduce them proportionally
-        for (let i = 0; i < votePreference.percentages.length; i++) {
-          const currentPercentage = votePreference.percentages[i];
-          const newPercentage = Math.floor((currentPercentage / totalExistingPercentage) * remainingPercentage);
-          newPercentages.push(newPercentage);
-        }
-        
-        // Add the platform app with selected percentage
-        const newAppIds = [...votePreference.appIds, appId];
-        newPercentages.push(platformPercentage);
-        
-        // Ensure percentages add up to 100%
-        let sum = newPercentages.reduce((a, b) => a + b, 0);
-        if (sum !== 100) {
-          // Adjust the last existing vote to make sum = 100
-          const diff = 100 - sum;
-          if (newPercentages.length > 1) {
-            newPercentages[0] += diff;
-          }
-        }
-        
-        // Build and execute the transaction to update votes
-        const clauses = await buildSupportClauses({
-          appIds: newAppIds,
-          percentages: newPercentages,
-          signingCallback: undefined
-        });
-        
-        if (!clauses || clauses.length === 0) {
-          throw new Error('Failed to create vote update transaction');
-        }
-        
-        const voteTx = await signer.sendTransaction({
-          clauses,
-          comment: `Vote with ${platformPercentage}% for ${platformAppName}`
-        });
-          
-        if (voteTx) {
-          setVoteUpdateSuccess(true);
-          await refetch();
-        }
-      } catch (err) {
-        console.error('Vote update error:', err);
-        setError(err instanceof Error ? err.message : 'Vote update failed');
-      } finally {
-        setIsLoading(false);
-      }
-    })();
   };
 
   // Modal styles
@@ -745,20 +570,6 @@ export function VeDelegateModal({ isOpen, onClose, mode = 'dark', primaryColor =
     return percentageButtonStyle(isCurrentSelection);
   };
 
-  // Helper function to convert hex to rgb
-  const hexToRgb = (hex: string): string => {
-    // Remove # if present
-    hex = hex.replace('#', '');
-    
-    // Parse the hex values
-    const r = parseInt(hex.substring(0, 2), 16);
-    const g = parseInt(hex.substring(2, 4), 16);
-    const b = parseInt(hex.substring(4, 6), 16);
-    
-    // Return RGB format
-    return `${r}, ${g}, ${b}`;
-  };
-
   // Create a style element for animations with theme support
   const styleElement = (
     <style>
@@ -880,40 +691,6 @@ export function VeDelegateModal({ isOpen, onClose, mode = 'dark', primaryColor =
     </style>
   );
 
-  // Platform notification style with theme support
-  const platformNotificationStyle: React.CSSProperties = {
-    backgroundColor: mode === 'dark' 
-      ? `rgba(${hexToRgb(primaryColor)}, 0.08)` 
-      : `rgba(${hexToRgb(primaryColor)}, 0.12)`,
-    border: `1px solid ${mode === 'dark' 
-      ? `rgba(${hexToRgb(primaryColor)}, 0.2)` 
-      : `rgba(${hexToRgb(primaryColor)}, 0.3)`}`,
-    padding: '0.75rem',
-    borderRadius: '6px',
-    marginBottom: '24px',
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: '12px',
-    fontSize: '0.8rem',
-    letterSpacing: '0.25px',
-    color: mode === 'dark' ? '#e5e7eb' : '#111827',
-  };
-
-  // Vote update success notification style with theme support
-  const voteUpdateSuccessStyle: React.CSSProperties = {
-    backgroundColor: mode === 'dark' ? 'rgba(75, 85, 99, 0.2)' : 'rgba(75, 85, 99, 0.1)',
-    border: `1px solid ${mode === 'dark' ? 'rgba(156, 163, 175, 0.5)' : 'rgba(156, 163, 175, 0.2)'}`,
-    padding: '0.75rem',
-    borderRadius: '6px',
-    marginBottom: '24px',
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: '12px',
-    fontSize: '0.8rem',
-    letterSpacing: '0.25px',
-    color: mode === 'dark' ? '#e5e7eb' : '#111827',
-  };
-
   // Button styles for the primary action button
   const actionButtonStyle: React.CSSProperties = {
     width: '100%',
@@ -948,7 +725,7 @@ export function VeDelegateModal({ isOpen, onClose, mode = 'dark', primaryColor =
               <span style={closeButtonContentStyle}>×</span>
             </button>
             <h2 style={headlineStyle}>
-              Stake to earn
+              {activeTab === 'voting' ? 'Voting preferences' : 'Stake to earn'}
             </h2>
           </div>
 
@@ -966,157 +743,11 @@ export function VeDelegateModal({ isOpen, onClose, mode = 'dark', primaryColor =
               >
                 Unstake
               </div>
+              {hasPool && <button type="button" style={{ borderTop: 'none', borderLeft: 'none', borderRight: 'none', background: 'transparent', fontFamily: 'inherit', ...tabStyle(activeTab === 'voting') }} onClick={() => handleTabChange('voting')}>Voting</button>}
             </div>
 
-            {/* Platform Vote Notification */}
-            {showPlatformVoteNotification && (
-              <div style={platformNotificationStyle}>
-                <div style={{ width: '100%' }}>
-                  <div>
-                    <span style={{ fontWeight: '500' }}>Consider voting for {platformAppName}</span>
-                    <span style={{ fontWeight: '300' }}>: Voting for {platformAppName} ensures continued development and improvements and increased rewards.</span>
-                  </div>
-                  
-                  {/* Percentage dropdown container */}
-                  <div style={{ position: 'relative', marginTop: '12px', width: '100%' }} className="percentage-dropdown-container">
-                    {/* Dropdown toggle button */}
-                    <button
-                      style={{
-                        width: '100%',
-                        padding: '6px 10px',
-                        background: mode === 'dark' ? '#374151' : '#d1d5db', // dark: bg-gray-700, light: darker gray for better contrast
-                        color: mode === 'dark' ? 'white' : '#111827',
-                        border: 'none',
-                        borderRadius: '6px',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        cursor: 'pointer',
-                        boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-                        fontSize: '0.75rem', // smaller text
-                        textTransform: 'uppercase',
-                        height: '32px', // more compact height
-                        transition: 'background-color 0.2s',
-                      }}
-                      onClick={handleDropdownClick}
-                      disabled={isLoading}
-                      onMouseOver={(e) => {
-                        e.currentTarget.style.background = mode === 'dark' ? '#4b5563' : '#9ca3af'; // hover styles
-                      }}
-                      onMouseOut={(e) => {
-                        e.currentTarget.style.background = mode === 'dark' ? '#374151' : '#d1d5db'; // default styles
-                      }}
-                      className="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-600"
-                    >
-                      <span>{isLoading ? 'Updating...' : `Vote with ${votePercentage}% for ${platformAppName}`}</span>
-                      <span 
-                        style={{ 
-                          transition: 'transform 0.2s', 
-                          transform: isDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-                          fontSize: '0.7rem',
-                          marginLeft: '8px',
-                          pointerEvents: 'none' // Ensure clicks pass through to the parent button
-                        }}
-                      >
-                        ▼
-                      </span>
-                    </button>
-                    
-                    {/* Dropdown menu */}
-                    {isDropdownOpen && (
-                      <div
-                        ref={dropdownRef}
-                        className="dropdown-enter"
-                        style={{
-                          position: 'absolute',
-                          top: 'calc(100% + 4px)',
-                          left: 0,
-                          width: '100%',
-                          background: mode === 'dark' ? '#1f2937' : '#f9fafb', 
-                          borderRadius: '6px',
-                          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                          zIndex: 100,
-                          overflow: 'hidden',
-                          border: mode === 'dark' ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid rgba(0, 0, 0, 0.1)',
-                          transformOrigin: 'top center'
-                        }}
-                      >
-                        {[10, 20, 50, 100].map((percent) => (
-                          <div
-                            key={percent}
-                            style={{
-                              padding: '6px 10px',
-                              cursor: 'pointer',
-                              borderBottom: mode === 'dark' ? '1px solid rgba(255, 255, 255, 0.05)' : '1px solid rgba(0, 0, 0, 0.05)',
-                              background: votePercentage === percent 
-                                ? (mode === 'dark' ? 'rgba(75, 85, 99, 0.4)' : 'rgba(209, 213, 219, 0.4)') 
-                                : 'transparent',
-                              display: 'flex',
-                              alignItems: 'center',
-                              fontSize: '0.75rem',
-                              color: mode === 'dark' ? '#e5e7eb' : '#111827',
-                              fontWeight: votePercentage === percent ? 500 : 400,
-                              transition: 'background-color 0.2s'
-                            }}
-                            onClick={() => handleOptionSelect(percent)}
-                            onMouseOver={(e) => {
-                              if (votePercentage !== percent) {
-                                e.currentTarget.style.background = mode === 'dark' 
-                                  ? 'rgba(75, 85, 99, 0.2)' 
-                                  : 'rgba(209, 213, 219, 0.2)';
-                              }
-                            }}
-                            onMouseOut={(e) => {
-                              if (votePercentage !== percent) {
-                                e.currentTarget.style.background = 'transparent';
-                              }
-                            }}
-                          >
-                            <span style={{ 
-                              width: '14px', 
-                              height: '14px', 
-                              borderRadius: '50%', 
-                              border: '2px solid',
-                              borderColor: votePercentage === percent 
-                                ? (mode === 'dark' ? '#9ca3af' : '#6b7280') 
-                                : (mode === 'dark' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.2)'),
-                              marginRight: '8px',
-                              display: 'inline-flex',
-                              justifyContent: 'center',
-                              alignItems: 'center'
-                            }}>
-                              {votePercentage === percent && (
-                                <span style={{ 
-                                  width: '6px', 
-                                  height: '6px', 
-                                  borderRadius: '50%', 
-                                  background: mode === 'dark' ? '#9ca3af' : '#6b7280'
-                                }}></span>
-                              )}
-                            </span>
-                            <span>
-                              {percent}% of voting power
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Vote Update Success Message */}
-            {voteUpdateSuccess && (
-              <div style={voteUpdateSuccessStyle}>
-                <div>
-                  <span style={{ fontWeight: '300' }}>
-                    Your vote allocation has been updated to include {platformAppName}. Thank you for your support!
-                  </span>
-                </div>
-              </div>
-            )}
-
+            {hasPool && activeTab === 'voting' && <VotingPanel key={`${account}:${veDelegateState.address}`} mode={mode} primaryColor={primaryColor} />}
+            {activeTab !== 'voting' && <>
             {/* Transaction success message */}
             {transactionSuccess && (
               <div style={successStyle}>
@@ -1239,6 +870,7 @@ export function VeDelegateModal({ isOpen, onClose, mode = 'dark', primaryColor =
               </div>
             )}
 
+            </>}
             <div style={footerStyle}>
               Powered by <a href="https://vedelegate.vet" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit' }}>veDelegate.vet</a>
               <img

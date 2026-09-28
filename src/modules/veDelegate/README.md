@@ -172,4 +172,38 @@ The module supports both light and dark themes, as well as custom primary colors
 ## Dependencies
 
 - React
-- @vechain/dapp-kit-react for blockchain connectivity 
+- @vechain/dapp-kit-react for blockchain connectivity
+### Voting preferences
+
+After the first stake, the modal includes a **Voting** tab. The first stake still
+sets 100% for the configured app. Existing preferences are read from
+`VeDelegateVotes.getVotes` and are never replaced by this preset automatically.
+An empty on-chain preference is shown as empty.
+
+The app list uses `X2EarnApps.allEligibleApps()` and `app(appId)` through the
+configured Thor client; no Graph or metadata endpoint is used for voting.
+Eligibility refers to the registry's current eligibility for upcoming rounds.
+Saved allocations to ineligible apps remain visible and must be moved before
+saving. Names unavailable from the registry fall back to the app ID.
+
+Users enter whole percentages totaling 100%; the `%` suffix is inside each
+field. **100% for this app** changes only the draft. **Save votes** rechecks
+eligibility, requests the wallet transaction, waits for a successful receipt,
+and reloads the preference. Zero allocations are omitted. Failed reads,
+rejected signatures, reverts, and confirmation timeouts do not report success.
+
+`VeDelegateState` additionally exposes `votesLoading`, `votesError`, and
+`refreshVotes(): Promise<void>`. The vote clause builder rejects duplicate app
+IDs, invalid percentages, and totals other than 100%.
+
+### Verification
+
+Use a current Node.js version supported by Vite/Vitest (Node 22.13+ or 24+).
+Run `npm test`, `npm run typecheck`, and `npm run build`.
+
+For a local browser fixture, run
+`npx vite --config tests/browser/vite.config.mts` and open
+`http://127.0.0.1:4173/tests/browser/index.html`.
+It renders the real provider, modal, editor and clause builder with in-memory
+chain and wallet adapters. No real transaction can be sent. Query parameters
+`mode=light`, `empty`, `error`, `reject`, and `revert` exercise alternate states.
